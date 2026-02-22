@@ -21,6 +21,9 @@ dev = [
     "pytest>=7.0",
     "torch>=2.0",  # for weight conversion only
 ]
+data = [
+    "datasets>=2.14.0",  # for download_tinystories.py, download_chat_datasets.py
+]
 
 [project.scripts]
 rwkv-mlx-train = "rwkv_mlx.train:main"
