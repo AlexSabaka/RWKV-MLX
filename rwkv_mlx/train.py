@@ -115,7 +115,8 @@ class SFTDataset:
     PAD_ID = 65537   # <|pad|>
     EOS_ID = 65536   # <|eos|>
 
-    def __init__(self, data_path: str, ctx_len: int, vocab_file: str = None):
+    def __init__(self, data_path: str, ctx_len: int, vocab_file: str = None,
+                 max_records: int = None):
         from pathlib import Path
         from .tokenizer import RWKVTokenizer
 
@@ -137,29 +138,36 @@ class SFTDataset:
 
         self.tokenizer = RWKVTokenizer(vocab_file)
         self.ctx_len = ctx_len
-        self.records = []  # list of (input_ids, output_ids)
+
+        # Raw text records — tokenization is lazy (done on first access per record)
+        self._raw: list[tuple[str, str]] = []   # (input_str, output_str)
+        self._cache: list[tuple | None] = []    # (input_ids, output_ids) or None
 
         import json
+        from tqdm import tqdm
         with open(data_path, "r", encoding="utf-8") as f:
-            for line in f:
+            for line in tqdm(f, desc="Loading SFT records", unit="rec"):
                 line = line.strip()
                 if not line:
                     continue
                 obj = json.loads(line)
-                inp = self.tokenizer.encode(obj["input"])
-                out = self.tokenizer.encode(obj["output"])
-                out.append(self.EOS_ID)  # always end output with EOS
-                self.records.append((inp, out))
+                self._raw.append((obj["input"], obj["output"]))
+                if max_records and len(self._raw) >= max_records:
+                    break
 
-        print(f"Loaded {len(self.records):,} SFT records from {data_path}")
-        # Check average lengths
-        avg_in  = sum(len(r[0]) for r in self.records) / len(self.records)
-        avg_out = sum(len(r[1]) for r in self.records) / len(self.records)
-        print(f"  Avg input: {avg_in:.0f} tokens, avg output: {avg_out:.0f} tokens")
-        truncated = sum(1 for r in self.records if len(r[0]) + len(r[1]) > ctx_len)
-        if truncated:
-            print(f"  {truncated} records ({100*truncated/len(self.records):.1f}%) "
-                  f"will be truncated to ctx_len={ctx_len}")
+        self._cache = [None] * len(self._raw)
+        print(f"Loaded {len(self._raw):,} SFT records from {data_path}")
+        print(f"  Tokenization is lazy — records are encoded on first access")
+
+    def _get_tokens(self, i: int) -> tuple[list, list]:
+        """Return (input_ids, output_ids) for record i, tokenizing on first call."""
+        if self._cache[i] is None:
+            inp_str, out_str = self._raw[i]
+            inp = self.tokenizer.encode(inp_str)
+            out = self.tokenizer.encode(out_str)
+            out.append(self.EOS_ID)
+            self._cache[i] = (inp, out)
+        return self._cache[i]
 
     def _pack(self, inp: list, out: list) -> tuple:
         """Pack input+output into (tokens, mask) of length ctx_len."""
@@ -179,10 +187,10 @@ class SFTDataset:
 
     def get_batch(self, batch_size: int) -> tuple[mx.array, mx.array, mx.array]:
         """Get a random batch of (x, y, mask) triples."""
-        indices = np.random.randint(0, len(self.records), size=batch_size)
+        indices = np.random.randint(0, len(self._raw), size=batch_size)
         x_rows, y_rows, m_rows = [], [], []
         for i in indices:
-            inp, out = self.records[i]
+            inp, out = self._get_tokens(int(i))
             tokens, mask = self._pack(inp, out)
             x_rows.append(tokens[:-1])
             y_rows.append(tokens[1:])
@@ -375,6 +383,7 @@ def train(
     sequential: bool = False,
     sft_data: str = None,
     vocab_file: str = None,
+    max_sft_examples: int = None,
 ):
     """Main training function for RWKV-v7 on MLX."""
     os.makedirs(output_dir, exist_ok=True)
@@ -427,7 +436,8 @@ def train(
 
     # Load data — SFT mode takes precedence over plain text dataset
     if sft_data:
-        sft_dataset = SFTDataset(sft_data, config.ctx_len, vocab_file=vocab_file)
+        sft_dataset = SFTDataset(sft_data, config.ctx_len, vocab_file=vocab_file,
+                                 max_records=max_sft_examples)
         dataset = None  # not needed; all batches come from sft_dataset
     else:
         sft_dataset = None
@@ -660,6 +670,8 @@ def main():
                         help="Read batches in order (for curriculum-ranked .bin files)")
     parser.add_argument("--sft_data", type=str, default=None,
                         help="JSONL file for supervised fine-tuning (input/output pairs)")
+    parser.add_argument("--max_sft_examples", type=int, default=None,
+                        help="Max SFT records to load (optional cap for large datasets)")
     parser.add_argument("--vocab_file", type=str, default=None,
                         help="Path to rwkv_vocab_v20230424.txt (auto-detected if omitted)")
 
@@ -693,6 +705,7 @@ def main():
         sequential=args.sequential,
         sft_data=args.sft_data,
         vocab_file=args.vocab_file,
+        max_sft_examples=args.max_sft_examples,
     )
 
 
