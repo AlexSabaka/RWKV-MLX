@@ -204,35 +204,6 @@ python -m rwkv_mlx.finetune_moe \
 
 The base model is frozen. Only LoRA adapters (~9MB delta file) and router weights are saved.
 
-## Online Weight Nowcasting (NiNo)
-
-An MLX-native adaptation of [NiNo: Accelerating Training with Neuron Interaction and Nowcasting Networks](https://arxiv.org/abs/2409.04434) (Knyazev et al., ICLR 2025).
-
-Instead of running AdamW every step, every `nino_period` steps the nowcaster predicts `θ_{t+k}` from the last `c` parameter snapshots and teleports the model there — skipping `k` gradient steps. The skip horizon `k` decays quadratically (large early, small late). The nowcaster trains **online** alongside the base model at negligible overhead (<0.5% wallclock).
-
-```bash
-# Two-phase NiNo co-training
-python -m rwkv_mlx.train_nino \
-    --data data/tinystories_asc.bin \
-    --output models/ts-nino \
-    --n_layer 4 --n_embd 64 \
-    --micro_bsz 2 --ctx_len 1024 \
-    --nino_warmup 5000 \
-    --nino_period 500 \
-    --nino_k_max 100 \
-    --total_steps 100000
-
-# Resume from checkpoint (restores both model and nowcaster)
-python -m rwkv_mlx.train_nino \
-    --data data/tinystories_asc.bin \
-    --output models/ts-nino \
-    --resume models/ts-nino/rwkv-50000.safetensors \
-    --nino_resume models/ts-nino/nino-50000.npz \
-    --total_steps 100000
-```
-
-Key NiNo hyperparameters: `--nino_warmup` (5000), `--nino_period` (500), `--nino_k_max` (100), `--nino_rollback` (1.5 × recent avg loss), `--nino_delta_scale` (1.0, reduce if unstable).
-
 ## Architecture
 
 ```text
