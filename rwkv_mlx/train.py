@@ -544,7 +544,7 @@ def train(
     tokens_processed = 0
     last_log_time = start_time
 
-    with tqdm(range(start_step, total_steps + 1), total=total_steps - start_step, desc="Training", unit="step", initial=start_step) as pbar:
+    with tqdm(range(start_step, total_steps + 1), total=total_steps, desc="Training", unit="step", initial=start_step) as pbar:
         for step in pbar:
             step_tokens = effective_bsz * config.ctx_len
 

@@ -28,6 +28,7 @@ data = [
 [project.scripts]
 rwkv-mlx-train = "rwkv_mlx.train:main"
 rwkv-mlx-generate = "rwkv_mlx.generate:main"
+rwkv-mlx-chat = "rwkv_mlx.chat:main"
 rwkv-mlx-convert = "rwkv_mlx.convert:main"
 
 [tool.setuptools.packages.find]
